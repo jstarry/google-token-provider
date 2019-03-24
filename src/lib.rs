@@ -66,10 +66,10 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn new(credentials: Credentials, scopes: impl Iterator<Item = String>) -> Client {
+    pub fn new<'a>(credentials: Credentials, scopes: impl Iterator<Item = &'a str>) -> Client {
         Client {
             credentials,
-            scopes: scopes.collect::<Vec<String>>().join(" "),
+            scopes: scopes.collect::<Vec<&str>>().join(" "),
             http: HTTPClient::new(),
             access_token: Rc::default(),
         }
