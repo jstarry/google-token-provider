@@ -13,7 +13,7 @@ use std::rc::Rc;
 use std::time::UNIX_EPOCH;
 use std::time::{Duration, SystemTime};
 
-const TOKEN_URL: &'static str = "https://www.googleapis.com/oauth2/v4/token";
+const TOKEN_URL: &str = "https://www.googleapis.com/oauth2/v4/token";
 
 #[derive(Debug, Clone)]
 pub struct Credentials {
@@ -99,8 +99,8 @@ impl Client {
                 let request = self.http.post(TOKEN_URL).form(&params);
                 let token_fut = request
                     .send()
-                    .map_err(|err| Error::from(err))
-                    .and_then(|response| Self::parse_response(response));
+                    .map_err(Error::from)
+                    .and_then(Self::parse_response);
                 Box::new(token_fut)
             }
         }
@@ -109,7 +109,7 @@ impl Client {
     fn parse_response(mut response: Response) -> impl Future<Item = AccessToken, Error = Error> {
         response
             .json::<TokenResponse>()
-            .map_err(|err| Error::from(err))
+            .map_err(Error::from)
             .and_then(|response| {
                 Ok(AccessToken {
                     value: response.access_token,
