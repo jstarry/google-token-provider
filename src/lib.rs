@@ -1,15 +1,12 @@
 use failure::Error;
-use futures::future::{err, ok, Future};
 use jsonwebtoken::{Algorithm, Header};
 use openssl::pkey::Private;
 use openssl::rsa::Rsa;
-use reqwest::r#async::Client as HTTPClient;
-use reqwest::r#async::Response;
+use reqwest::Client as HTTPClient;
+use reqwest::Response;
 use serde::{Deserialize, Serialize};
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ops::Add;
-use std::rc::Rc;
 use std::time::UNIX_EPOCH;
 use std::time::{Duration, SystemTime};
 
@@ -62,7 +59,7 @@ pub struct Client {
     credentials: Credentials,
     scopes: String,
     http: HTTPClient,
-    access_token: Rc<RefCell<Option<AccessToken>>>,
+    access_token: Option<AccessToken>,
 }
 
 impl Client {
@@ -71,50 +68,42 @@ impl Client {
             credentials,
             scopes: scopes.collect::<Vec<&str>>().join(" "),
             http: HTTPClient::new(),
-            access_token: Rc::default(),
+            access_token: None,
         }
     }
 
-    pub fn get_token(&mut self) -> Box<Future<Item = AccessToken, Error = Error>> {
-        if let Some(token) = self.access_token.borrow().clone() {
+    pub fn get_token(&mut self) -> Result<AccessToken, Error> {
+        if let Some(token) = &self.access_token {
             if !token.expired() {
-                return Box::new(ok(token.clone()));
+                return Ok(token.clone());
             }
         }
 
-        let token_clone = self.access_token.clone();
-        Box::new(self.fetch_token().and_then(move |token| {
-            token_clone.borrow_mut().replace(token.clone());
-            ok(token)
-        }))
+        self.access_token = Some(self.fetch_token()?);
+        Ok(self.access_token.clone().unwrap())
     }
 
-    fn fetch_token(&mut self) -> Box<Future<Item = AccessToken, Error = Error>> {
-        match self.create_jwt() {
-            Err(error) => Box::new(err(error)),
-            Ok(token) => {
-                let mut params = HashMap::new();
-                params.insert("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer");
-                params.insert("assertion", &token);
-                let request = self.http.post(TOKEN_URL).form(&params);
-                let token_fut = request
-                    .send()
-                    .map_err(Error::from)
-                    .and_then(Self::parse_response);
-                Box::new(token_fut)
-            }
-        }
+    fn fetch_token(&mut self) -> Result<AccessToken, Error> {
+        let token = self.create_jwt()?;
+        let mut params = HashMap::new();
+        params.insert("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer");
+        params.insert("assertion", &token);
+
+        self.http
+            .post(TOKEN_URL)
+            .form(&params)
+            .send()
+            .map_err(Error::from)
+            .and_then(Self::parse_response)
     }
 
-    fn parse_response(mut response: Response) -> impl Future<Item = AccessToken, Error = Error> {
+    fn parse_response(mut response: Response) -> Result<AccessToken, Error> {
         response
             .json::<TokenResponse>()
             .map_err(Error::from)
-            .and_then(|response| {
-                Ok(AccessToken {
-                    value: response.access_token,
-                    expires: SystemTime::now() + Duration::from_secs(response.expires_in),
-                })
+            .map(|response| AccessToken {
+                value: response.access_token,
+                expires: SystemTime::now() + Duration::from_secs(response.expires_in),
             })
     }
 
